@@ -3,7 +3,7 @@ import { loadConfig } from './config.js';
 import { PastitaPrintAgent } from './agent.js';
 import { listWindowsPrinters } from './printers/windows-raw.js';
 
-const command = process.argv[2];
+const command = process.argv[2] || 'start';
 
 if (command === 'start') {
   const config = loadConfig();
