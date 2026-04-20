@@ -33,12 +33,8 @@ if (command === 'start') {
 } else if (command === 'test-print') {
   const config = loadConfig();
   const { printRawWindows } = await import('./printers/windows-raw.js');
-  const { buildKitchenTicket } = await import('./escpos.js');
-  const data = buildKitchenTicket({
-    order_number: 'TEST-001',
-    created_at: new Date().toISOString(),
-    items: [{ name: 'Teste de impressão', quantity: 1, notes: '' }],
-  });
+  const { buildTestTicket } = await import('./escpos.js');
+  const data = buildTestTicket();
   await printRawWindows({ printerName: config.printerName, data });
   console.log('[print-agent] Impressão de teste enviada para:', config.printerName);
 } else {
