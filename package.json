@@ -1,0 +1,20 @@
+{
+  "name": "pastita-print-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local print agent for automatic Epson TM-T20 order printing",
+  "scripts": {
+    "start": "node src/cli.js start",
+    "list-printers": "node src/cli.js list-printers",
+    "test-print": "node src/cli.js test-print",
+    "install-service": "node scripts/service.cjs install",
+    "uninstall-service": "node scripts/service.cjs uninstall"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "node-windows": "^1.0.0-beta.8"
+  }
+}
