@@ -7,9 +7,14 @@ export function loadConfig() {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const parsed = JSON.parse(raw);
 
+  // suporta agentKey (string) ou agentKeys (array)
+  const agentKeys = Array.isArray(parsed.agentKeys)
+    ? parsed.agentKeys
+    : [String(parsed.agentKey || '')];
+
   return {
     backendUrl: String(parsed.backendUrl || '').replace(/\/+$/, ''),
-    agentKey: String(parsed.agentKey || ''),
+    agentKeys,
     printerName: String(parsed.printerName || ''),
     pollIntervalMs: Number(parsed.pollIntervalMs || 2000),
     heartbeatIntervalMs: Number(parsed.heartbeatIntervalMs || 30000),
