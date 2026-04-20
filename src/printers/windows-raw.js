@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PRINT_SCRIPT = path.join(ROOT, 'scripts', 'windows-print-raw.ps1');
 const LIST_SCRIPT = path.join(ROOT, 'scripts', 'list-printers.ps1');
 
