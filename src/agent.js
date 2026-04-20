@@ -48,7 +48,7 @@ export class PastitaPrintAgent {
           await sleep(this.config.pollIntervalMs);
         }
       } catch (error) {
-        console.error('[print-agent] loop error:', error.message);
+        console.error('[print-agent] loop error:', error.message ?? JSON.stringify(error));
         await sleep(this.config.pollIntervalMs);
       }
     }

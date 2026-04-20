@@ -32,8 +32,9 @@ export class PrintApiClient {
 
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = body.detail || body.error || `HTTP ${response.status}`;
-      throw new Error(message);
+      const detail = body.detail || body.error || body;
+      const message = typeof detail === 'string' ? detail : JSON.stringify(detail);
+      throw new Error(`HTTP ${response.status}: ${message}`);
     }
     return body;
   }
