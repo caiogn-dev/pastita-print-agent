@@ -44,7 +44,7 @@ export async function printRawWindows({ printerName, data }) {
   const tempFile = path.join(os.tmpdir(), `pastita-print-${Date.now()}.bin`);
   fs.writeFileSync(tempFile, data);
   try {
-    await runPowerShell(PRINT_SCRIPT, [
+    return await runPowerShell(PRINT_SCRIPT, [
       '-PrinterName', printerName,
       '-FilePath', tempFile,
     ]);

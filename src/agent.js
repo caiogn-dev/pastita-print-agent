@@ -40,9 +40,16 @@ export class PastitaPrintAgent {
             });
             continue;
           }
-          await this.#printJob(api, job);
+          const printResult = await this.#printJob(api, job);
           this.stateStore.markCompleted(job);
-          await api.completeJob(job.id, { printer_name: this.config.printerName });
+          await api.completeJob(job.id, {
+            printer_name: this.config.printerName,
+            metadata: {
+              host_name: os.hostname(),
+              printer_name: this.config.printerName,
+              print_result: printResult,
+            },
+          });
         }
         if (!gotJob) {
           await sleep(this.config.pollIntervalMs);
@@ -79,7 +86,7 @@ export class PastitaPrintAgent {
     }
     const data = buildKitchenTicket(job.payload);
     try {
-      await printRawWindows({ printerName: this.config.printerName, data });
+      return await printRawWindows({ printerName: this.config.printerName, data });
     } catch (error) {
       await api.failJob(job.id, { error: error.message, retryable: true });
       throw error;
