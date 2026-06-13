@@ -20,6 +20,36 @@ export class PrintApiClient {
     return this.#post(`/api/v1/stores/print/jobs/${jobId}/fail/`, payload);
   }
 
+  watchJobs(onJob, onError, onClose) {
+    const url = new URL(`${this.backendUrl}/api/v1/stores/print/agent/watch/`);
+    const eventSource = new EventSource(url, {
+      headers: {
+        'X-Print-Agent-Key': this.agentKey,
+      },
+    });
+
+    eventSource.addEventListener('message', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'job' && data.data) {
+          onJob(data.data);
+        }
+      } catch (e) {
+        onError?.(new Error(`Failed to parse SSE message: ${e.message}`));
+      }
+    });
+
+    eventSource.addEventListener('error', (event) => {
+      if (event.type === 'error') {
+        onError?.(new Error('SSE connection error'));
+      }
+      eventSource.close();
+      onClose?.();
+    });
+
+    return () => eventSource.close();
+  }
+
   async #post(path, payload) {
     const response = await fetch(`${this.backendUrl}${path}`, {
       method: 'POST',

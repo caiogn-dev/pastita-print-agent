@@ -4,6 +4,7 @@ import { PrintApiClient } from './api-client.js';
 import { buildKitchenTicket } from './escpos.js';
 import { StateStore } from './state-store.js';
 import { printRawWindows } from './printers/windows-raw.js';
+import { listWindowsPrinters } from './printers/list-windows.js';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -24,6 +25,60 @@ export class PastitaPrintAgent {
     while (this.running) {
       try {
         await this.#maybeHeartbeat();
+        await this.#watchJobsWithFallback();
+      } catch (error) {
+        console.error('[print-agent] loop error:', error.message ?? JSON.stringify(error));
+        await sleep(this.config.pollIntervalMs);
+      }
+    }
+  }
+
+  async #watchJobsWithFallback() {
+    const promises = this.clients.map((api) =>
+      new Promise((resolve) => {
+        const closeUnwatch = api.watchJobs(
+          async (job) => {
+            if (this.stateStore.hasSeenJob(job)) {
+              await api.completeJob(job.id, {
+                printer_name: this.config.printerName,
+                metadata: { skipped_duplicate: true },
+              });
+              return;
+            }
+            const printResult = await this.#printJob(api, job);
+            this.stateStore.markCompleted(job);
+            await api.completeJob(job.id, {
+              printer_name: this.config.printerName,
+              metadata: {
+                host_name: os.hostname(),
+                printer_name: this.config.printerName,
+                print_result: printResult,
+              },
+            });
+          },
+          (error) => {
+            console.error('[print-agent] SSE error:', error.message);
+            closeUnwatch();
+            resolve();
+          },
+          () => {
+            console.warn('[print-agent] SSE connection closed, falling back to polling');
+            resolve();
+          }
+        );
+      })
+    );
+
+    await Promise.race(promises);
+    await this.#pollWithBackoff();
+  }
+
+  async #pollWithBackoff() {
+    let retries = 0;
+    const maxRetries = 10;
+
+    while (this.running && retries < maxRetries) {
+      try {
         let gotJob = false;
         for (const api of this.clients) {
           const response = await api.claimNext({
@@ -33,6 +88,7 @@ export class PastitaPrintAgent {
           const job = response.job;
           if (!job) continue;
           gotJob = true;
+          retries = 0;
           if (this.stateStore.hasSeenJob(job)) {
             await api.completeJob(job.id, {
               printer_name: this.config.printerName,
@@ -52,13 +108,19 @@ export class PastitaPrintAgent {
           });
         }
         if (!gotJob) {
-          await sleep(this.config.pollIntervalMs);
+          retries++;
+          const delay = Math.min(1000 * Math.pow(2, retries), 30000);
+          await sleep(delay);
         }
       } catch (error) {
-        console.error('[print-agent] loop error:', error.message ?? JSON.stringify(error));
-        await sleep(this.config.pollIntervalMs);
+        console.error('[print-agent] polling error:', error.message);
+        retries++;
+        const delay = Math.min(1000 * Math.pow(2, retries), 30000);
+        await sleep(delay);
       }
     }
+
+    console.log('[print-agent] Polling timeout reached, reconnecting to SSE');
   }
 
   stop() {
@@ -68,16 +130,34 @@ export class PastitaPrintAgent {
   async #maybeHeartbeat() {
     const now = Date.now();
     if (now - this.lastHeartbeatAt < this.config.heartbeatIntervalMs) return;
-    await Promise.allSettled(
+
+    // Detecção dinâmica: envia as impressoras instaladas no PC; o painel
+    // popula o dropdown e o lojista escolhe sem digitar nome de impressora
+    const availablePrinters = await listWindowsPrinters();
+
+    const results = await Promise.allSettled(
       this.clients.map((api) =>
         api.heartbeat({
-          app_version: '0.1.0',
+          app_version: '0.2.0',
           host_name: os.hostname(),
-          printer_name: this.config.printerName,
+          printer_name: this.#effectivePrinter(api),
+          available_printers: availablePrinters,
         })
       )
     );
+
+    // O painel é a fonte de verdade: se o backend devolver printer_name,
+    // o agent passa a usar essa impressora (por loja) sem editar o config
+    results.forEach((res, idx) => {
+      const name = res.status === 'fulfilled' ? res.value?.printer_name : null;
+      if (name) this.clients[idx].panelPrinterName = name;
+    });
+
     this.lastHeartbeatAt = now;
+  }
+
+  #effectivePrinter(api) {
+    return api?.panelPrinterName || this.config.printerName;
   }
 
   async #printJob(api, job) {
@@ -86,7 +166,7 @@ export class PastitaPrintAgent {
     }
     const data = buildKitchenTicket(job.payload);
     try {
-      return await printRawWindows({ printerName: this.config.printerName, data });
+      return await printRawWindows({ printerName: this.#effectivePrinter(api), data });
     } catch (error) {
       await api.failJob(job.id, { error: error.message, retryable: true });
       throw error;
