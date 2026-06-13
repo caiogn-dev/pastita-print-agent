@@ -3,8 +3,20 @@ import os from 'node:os';
 import { PrintApiClient } from './api-client.js';
 import { buildKitchenTicket } from './escpos.js';
 import { StateStore } from './state-store.js';
-import { printRawWindows } from './printers/windows-raw.js';
-import { listWindowsPrinters } from './printers/list-windows.js';
+import { printRawWindows, listWindowsPrinters } from './printers/windows-raw.js';
+
+// Cache da lista de impressoras (5min) — evita rodar PowerShell a cada heartbeat
+let printersCache = { at: 0, list: [] };
+async function detectPrinters() {
+  if (Date.now() - printersCache.at < 5 * 60 * 1000) return printersCache.list;
+  try {
+    const list = await listWindowsPrinters();
+    printersCache = { at: Date.now(), list: Array.isArray(list) ? list : [] };
+  } catch {
+    printersCache = { at: Date.now(), list: [] };
+  }
+  return printersCache.list;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -133,7 +145,7 @@ export class PastitaPrintAgent {
 
     // Detecção dinâmica: envia as impressoras instaladas no PC; o painel
     // popula o dropdown e o lojista escolhe sem digitar nome de impressora
-    const availablePrinters = await listWindowsPrinters();
+    const availablePrinters = await detectPrinters();
 
     const results = await Promise.allSettled(
       this.clients.map((api) =>
