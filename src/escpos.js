@@ -103,6 +103,16 @@ function renderItem(item) {
   const variant = item.variant_name ?? item.variant ?? '';
   if (variant) out.push(line(`   > ${variant}`));
 
+  // Escolhas de combo / detalhes vindos do backend (payload 'details').
+  // Quando o backend também manda as escolhas espelhadas em 'ingredients'
+  // (compat com agents antigos), pula details p/ não imprimir 2x.
+  const hasIngredients = (item.ingredients ?? item.options?.ingredients ?? []).length > 0;
+  if (!hasIngredients) {
+    for (const d of (item.details ?? [])) {
+      for (const l of wrap(String(d), W, 3)) out.push(line(`   ${l}`));
+    }
+  }
+
   for (const ing of (item.ingredients ?? item.options?.ingredients ?? [])) {
     const role  = ing.role ? `${ing.role}: ` : '';
     const extra = ing.price > 0 ? ` (+${money(ing.price)})` : '';
