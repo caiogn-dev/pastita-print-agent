@@ -1,7 +1,7 @@
 import os from 'node:os';
 
 import { PrintApiClient } from './api-client.js';
-import { buildKitchenTicket } from './escpos.js';
+import { buildKitchenTicket, buildCustomerReceipt } from './escpos.js';
 import { StateStore } from './state-store.js';
 import { printRawWindows, listWindowsPrinters } from './printers/windows-raw.js';
 
@@ -173,10 +173,15 @@ export class PastitaPrintAgent {
   }
 
   async #printJob(api, job) {
-    if (job.template !== 'kitchen_ticket') {
+    const builders = {
+      kitchen_ticket: buildKitchenTicket,
+      customer_receipt: buildCustomerReceipt,
+    };
+    const builder = builders[job.template];
+    if (!builder) {
       throw new Error(`Unsupported template: ${job.template}`);
     }
-    const data = buildKitchenTicket(job.payload);
+    const data = builder(job.payload);
     try {
       return await printRawWindows({ printerName: this.#effectivePrinter(api), data });
     } catch (error) {

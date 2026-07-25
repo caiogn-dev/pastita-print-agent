@@ -293,3 +293,68 @@ export function buildTestTicket() {
     totals: { subtotal: '60.00', delivery_fee: '0.00', discount: '5.00', total: '55.00' },
   });
 }
+
+// ── Cupom do cliente (não fiscal) — venda de balcão/PDV ───────────────────────
+export function buildCustomerReceipt(payload) {
+  const store    = payload.store    ?? {};
+  const order    = payload.order    ?? {};
+  const customer = payload.customer ?? {};
+  const totals   = payload.totals   ?? {};
+  const items    = payload.items    ?? [];
+
+  const PAYMENT_LABELS = {
+    pix: 'PIX', credit_card: 'CREDITO', debit_card: 'DEBITO',
+    cash: 'DINHEIRO', card: 'CARTAO', mercadopago: 'MERCADO PAGO',
+  };
+  const payMethod = PAYMENT_LABELS[order.payment_method] ?? String(order.payment_method ?? '').toUpperCase();
+
+  const out = [];
+  out.push(INIT, CODEPAGE_PC850);
+
+  // Cabeçalho
+  out.push(ALIGN_CENTER, LF);
+  out.push(DOUBLE_ON, BOLD_ON, enc(String(store.name ?? 'LOJA').toUpperCase()), LF, BOLD_OFF, DOUBLE_OFF);
+  if (store.phone)   out.push(enc(store.phone), LF);
+  if (store.address) out.push(enc(store.address), LF);
+  out.push(LF, enc('*** CUPOM NAO FISCAL ***'), LF, dashed());
+
+  out.push(BOLD_ON, enc(`PEDIDO #${order.order_number ?? ''}`), LF, BOLD_OFF);
+  if (order.created_at) out.push(enc(formatDate(order.created_at)), LF);
+  out.push(ALIGN_LEFT, dashed());
+
+  // Itens com preço unitário
+  for (const item of items) {
+    const qty  = item.qty ?? 1;
+    const name = String(item.name ?? '');
+    for (const l of wrap(`${qty}x ${name}`)) out.push(line(l));
+    out.push(twoCols(`   ${money(item.unit_price)} un.`, money(item.subtotal)));
+  }
+  out.push(divider());
+
+  // Totais
+  const subtotal = parseFloat(totals.subtotal ?? 0);
+  const discount = parseFloat(totals.discount ?? 0);
+  const total    = parseFloat(totals.total    ?? 0);
+  out.push(twoCols('Subtotal:', money(subtotal)));
+  if (discount > 0) out.push(twoCols('Desconto:', `- ${money(discount)}`));
+  out.push(divider('='));
+  out.push(BOLD_ON, DOUBLE_HEIGHT_ON, twoCols('TOTAL:', money(total)), DOUBLE_OFF, BOLD_OFF);
+  out.push(divider('='));
+  out.push(twoCols('Pagamento:', payMethod));
+  out.push(dashed());
+
+  // Cliente (quando vinculado)
+  if (customer.name && customer.name !== 'Cliente Balcão') {
+    out.push(line(`Cliente: ${customer.name}`));
+    out.push(dashed());
+  }
+
+  // Rodapé
+  out.push(ALIGN_CENTER);
+  out.push(BOLD_ON, enc('Obrigado pela preferencia!'), LF, BOLD_OFF);
+  out.push(enc('Documento sem valor fiscal'), LF);
+  out.push(LF, LF, LF, LF);
+  out.push(CUT);
+
+  return Buffer.concat(out.flat().map((b) => Buffer.isBuffer(b) ? b : enc(b)));
+}
