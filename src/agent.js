@@ -100,31 +100,38 @@ export class PastitaPrintAgent {
       try {
         let gotJob = false;
         for (const api of this.clients) {
-          const response = await api.claimNext({
-            app_version: '0.1.0',
-            host_name: os.hostname(),
-          });
-          const job = response.job;
-          if (!job) continue;
-          gotJob = true;
-          retries = 0;
-          if (this.stateStore.hasSeenJob(job)) {
+          // Erro numa chave (revogada, loja suspensa…) não pode travar as
+          // outras — antes, uma chave morta no meio da lista reiniciava o
+          // loop e as chaves seguintes nunca rodavam.
+          try {
+            const response = await api.claimNext({
+              app_version: '0.1.0',
+              host_name: os.hostname(),
+            });
+            const job = response.job;
+            if (!job) continue;
+            gotJob = true;
+            retries = 0;
+            if (this.stateStore.hasSeenJob(job)) {
+              await api.completeJob(job.id, {
+                printer_name: this.config.printerName,
+                metadata: { skipped_duplicate: true },
+              });
+              continue;
+            }
+            const printResult = await this.#printJob(api, job);
+            this.stateStore.markCompleted(job);
             await api.completeJob(job.id, {
               printer_name: this.config.printerName,
-              metadata: { skipped_duplicate: true },
+              metadata: {
+                host_name: os.hostname(),
+                printer_name: this.config.printerName,
+                print_result: printResult,
+              },
             });
-            continue;
+          } catch (error) {
+            console.error('[print-agent] client error (chave ignorada neste ciclo):', error.message);
           }
-          const printResult = await this.#printJob(api, job);
-          this.stateStore.markCompleted(job);
-          await api.completeJob(job.id, {
-            printer_name: this.config.printerName,
-            metadata: {
-              host_name: os.hostname(),
-              printer_name: this.config.printerName,
-              print_result: printResult,
-            },
-          });
         }
         if (!gotJob) {
           retries++;
