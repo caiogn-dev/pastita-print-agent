@@ -46,6 +46,13 @@ export class PastitaPrintAgent {
   }
 
   async #watchJobsWithFallback() {
+    // Node < 22 não tem EventSource global — sem ele, polling direto
+    // (antes disso, o `new EventSource` explodia antes do fallback e o
+    // agente ficava preso em "loop error: EventSource is not defined")
+    if (typeof EventSource === 'undefined') {
+      await this.#pollWithBackoff();
+      return;
+    }
     const promises = this.clients.map((api) =>
       new Promise((resolve) => {
         const closeUnwatch = api.watchJobs(
