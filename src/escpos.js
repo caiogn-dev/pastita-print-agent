@@ -163,7 +163,11 @@ export function buildKitchenTicket(payload) {
   const items    = payload.items    ?? [];
   const combos   = payload.combo_items ?? [];
 
-  const isDelivery = (order.delivery_method ?? 'delivery') !== 'pickup';
+  // Três modos, não dois. `!== 'pickup'` jogava 'digital' em ENTREGA: a
+  // cobrança por link virava comanda mandando entregar, sem endereço nenhum.
+  const modo = order.delivery_method ?? 'delivery';
+  const isDelivery = modo === 'delivery';
+  const isPickup = modo === 'pickup';
 
   const PAYMENT_LABELS = {
     pix: 'PIX', credit_card: 'CREDITO', debit_card: 'DEBITO',
@@ -197,7 +201,9 @@ export function buildKitchenTicket(payload) {
 
   // Data/hora + tipo de entrega
   if (order.created_at) out.push(enc(formatDate(order.created_at)), LF);
-  const deliveryLabel = isDelivery ? '*** ENTREGA ***' : '*** RETIRADA ***';
+  const deliveryLabel = isDelivery
+    ? '*** ENTREGA ***'
+    : isPickup ? '*** RETIRADA ***' : '*** PAGAMENTO POR LINK ***';
   out.push(BOLD_ON, enc(deliveryLabel), LF, BOLD_OFF);
 
   // Agendado
@@ -214,7 +220,7 @@ export function buildKitchenTicket(payload) {
   if (isDelivery && payload.address_lines?.length) {
     out.push(LF, BOLD_ON, line('ENDERECO DE ENTREGA:'), BOLD_OFF);
     for (const l of payload.address_lines) out.push(line(String(l)));
-  } else if (!isDelivery) {
+  } else if (isPickup) {
     out.push(LF, BOLD_ON, line('** RETIRADA NO LOCAL **'), BOLD_OFF);
   }
   out.push(dashed());
