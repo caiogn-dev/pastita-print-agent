@@ -146,11 +146,13 @@ function renderItem(item) {
   const qty    = item.qty ?? item.quantity ?? 1;
   const name   = String(item.name ?? item.product_name ?? '').toUpperCase();
   const qtyTxt = `${qty}x`;
-  // corpo duplo = 2 colunas por caractere; '[ ] ' são 4 e o espaço depois, 1
-  const indent = 4 + qtyTxt.length * 2 + 1;
+  // Altura dupla, não largura: destaca igual e ocupa 1 coluna por caractere.
+  // Com DOUBLE_ON (2 colunas por char) o nome perdia 4 colunas das 48 e
+  // quebrava linha à toa.
+  const indent = 4 + qtyTxt.length + 1;
   const nameLines = wrap(name, W - indent);
 
-  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_ON, enc(qtyTxt), DOUBLE_OFF);
+  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_HEIGHT_ON, enc(qtyTxt), DOUBLE_OFF);
   out.push(enc(' ' + (nameLines[0] ?? '')), LF);
   for (const l of nameLines.slice(1)) out.push(line(' '.repeat(indent) + l));
   out.push(BOLD_OFF);
@@ -192,10 +194,10 @@ function renderCombo(combo) {
   const qty    = combo.quantity ?? 1;
   const name   = String(combo.combo_name ?? combo.name ?? '').toUpperCase();
   const qtyTxt = `${qty}x`;
-  const indent = 4 + qtyTxt.length * 2 + 1;
+  const indent = 4 + qtyTxt.length + 1;
   const nameLines = wrap(name, W - indent);
 
-  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_ON, enc(qtyTxt), DOUBLE_OFF);
+  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_HEIGHT_ON, enc(qtyTxt), DOUBLE_OFF);
   out.push(enc(' ' + (nameLines[0] ?? '')), LF);
   for (const l of nameLines.slice(1)) out.push(line(' '.repeat(indent) + l));
   out.push(BOLD_OFF);
