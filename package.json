@@ -9,7 +9,8 @@
     "list-printers": "node src/cli.js list-printers",
     "test-print": "node src/cli.js test-print",
     "install-service": "node scripts/service.cjs install",
-    "uninstall-service": "node scripts/service.cjs uninstall"
+    "uninstall-service": "node scripts/service.cjs uninstall",
+    "preview": "node scripts/preview.mjs"
   },
   "engines": {
     "node": ">=20"

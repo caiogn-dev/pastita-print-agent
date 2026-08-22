@@ -1,5 +1,7 @@
 import iconv from 'iconv-lite';
 
+import { TEST_LOGO } from './test-logo.js';
+
 // ── Constantes ESC/POS ────────────────────────────────────────────────────────
 const ESC = 0x1b;
 const GS  = 0x1d;
@@ -32,7 +34,7 @@ function line(text) {
   return Buffer.concat([enc(text), LF]);
 }
 
-function divider(char = '-') {
+function divider(char = '\u2500') {
   return line(char.repeat(W));
 }
 
@@ -59,7 +61,7 @@ function formatDate(iso) {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
       timeZone: 'America/Sao_Paulo',
-    });
+    }).replace(',', '');
   } catch { return String(iso ?? ''); }
 }
 
@@ -81,76 +83,137 @@ function wrap(text, maxLen = W, indentLen = 0) {
   return lines;
 }
 
+// ── Faixas, raster e código de barras ─────────────────────────────────────────
+
+// Centraliza dentro de uma largura fixa. O INVERT pinta o espaço também, então
+// preencher até a borda é o que faz a faixa sair cheia de ponta a ponta.
+function center(text, w = W) {
+  const t = String(text ?? '').slice(0, w);
+  const left = Math.floor((w - t.length) / 2);
+  return ' '.repeat(left) + t + ' '.repeat(w - t.length - left);
+}
+
+// Faixa invertida. `big` dobra o corpo — e como cada caractere passa a ocupar
+// duas colunas, a largura útil cai pela metade (24, não 48).
+function band(text, { big = false } = {}) {
+  const w = big ? W / 2 : W;
+  return [
+    ALIGN_LEFT, INVERT_ON, BOLD_ON, ...(big ? [DOUBLE_ON] : []),
+    enc(center(text, w)), LF,
+    ...(big ? [DOUBLE_OFF] : []), BOLD_OFF, INVERT_OFF,
+  ];
+}
+
+// Logo em raster (GS v 0). O backend manda o bitmap já em 1 bit; o agent não
+// converte imagem nenhuma — só despeja os bytes.
+function raster(logo) {
+  if (!logo?.data || !logo.width || !logo.height) return [];
+  const bytesPerRow = Math.ceil(logo.width / 8);
+  const data = Buffer.from(logo.data, 'base64');
+  // Bitmap truncado imprime lixo por metros de fita: melhor não imprimir nada.
+  if (data.length !== bytesPerRow * logo.height) return [];
+  return [
+    ALIGN_CENTER,
+    cmd(GS, 0x76, 0x30, 0x00,
+        bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
+        logo.height & 0xff, (logo.height >> 8) & 0xff),
+    data,
+  ];
+}
+
+// Code128 nativo (GS k 73). HRI desligada de propósito: com ela ligada a
+// impressora imprime o seletor '{B' junto do número.
+function barcode(code) {
+  const value = String(code ?? '').replace(/[^\x20-\x7e]/g, '').slice(0, 22);
+  if (!value) return [];
+  const data = Buffer.from(`{B${value}`, 'ascii');
+  return [
+    ALIGN_CENTER,
+    cmd(GS, 0x68, 0x50),  // altura 80 dots
+    cmd(GS, 0x77, 0x02),  // largura do módulo
+    cmd(GS, 0x48, 0x00),  // HRI off
+    cmd(GS, 0x6b, 0x49, data.length), data, LF,
+  ];
+}
+
+const IND = ' '.repeat(8);
+
 // ── Renderiza item ─────────────────────────────────────────────────────────────
+// Layout: '[ ] ' + quantidade em corpo duplo + nome. A quantidade é o dado que
+// mais gera erro na cozinha, então é a única coisa da linha que cresce.
 function renderItem(item) {
   const out    = [];
   const qty    = item.qty ?? item.quantity ?? 1;
-  const name   = item.name ?? item.product_name ?? '';
-  const sub    = parseFloat(item.subtotal ?? item.total_price ?? qty * Number(item.unit_price ?? 0));
-  const price  = money(sub);
-  const label  = `${qty}x ${name}`;
-  const maxLbl = W - price.length - 1;
+  const name   = String(item.name ?? item.product_name ?? '').toUpperCase();
+  const qtyTxt = `${qty}x`;
+  // corpo duplo = 2 colunas por caractere; '[ ] ' são 4 e o espaço depois, 1
+  const indent = 4 + qtyTxt.length * 2 + 1;
+  const nameLines = wrap(name, W - indent);
 
-  out.push(BOLD_ON);
-  if (label.length <= maxLbl) {
-    out.push(twoCols(label, price));
-  } else {
-    out.push(twoCols(`${qty}x`, price));
-    for (const l of wrap(name, W, 3)) out.push(line(`   ${l}`));
-  }
+  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_ON, enc(qtyTxt), DOUBLE_OFF);
+  out.push(enc(' ' + (nameLines[0] ?? '')), LF);
+  for (const l of nameLines.slice(1)) out.push(line(' '.repeat(indent) + l));
   out.push(BOLD_OFF);
 
   const variant = item.variant_name ?? item.variant ?? '';
-  if (variant) out.push(line(`   > ${variant}`));
+  if (variant) out.push(line(`${IND}· ${variant}`));
 
   // Escolhas de combo / detalhes vindos do backend (payload 'details').
   // Quando o backend também manda as escolhas espelhadas em 'ingredients'
   // (compat com agents antigos), pula details p/ não imprimir 2x.
-  const hasIngredients = (item.ingredients ?? item.options?.ingredients ?? []).length > 0;
-  if (!hasIngredients) {
+  const ingredients = item.ingredients ?? item.options?.ingredients ?? [];
+  if (ingredients.length === 0) {
     for (const d of (item.details ?? [])) {
-      for (const l of wrap(String(d), W, 3)) out.push(line(`   ${l}`));
+      for (const l of wrap(String(d), W - IND.length)) out.push(line(IND + l));
     }
   }
 
-  for (const ing of (item.ingredients ?? item.options?.ingredients ?? [])) {
+  for (const ing of ingredients) {
     const role  = ing.role ? `${ing.role}: ` : '';
     const extra = ing.price > 0 ? ` (+${money(ing.price)})` : '';
-    out.push(line(`   + ${role}${ing.name}${extra}`));
+    for (const l of wrap(`· ${role}${ing.name}${extra}`, W - IND.length)) out.push(line(IND + l));
   }
 
+  // A observação do item é o que gera retrabalho quando passa batido, então é a
+  // única coisa invertida dentro do bloco.
   if (item.notes) {
-    out.push(BOLD_ON);
-    for (const l of wrap(`OBS: ${item.notes}`, W, 3)) out.push(line(`   ${l}`));
-    out.push(BOLD_OFF);
+    for (const l of wrap(String(item.notes).toUpperCase(), W - IND.length - 2)) {
+      out.push(enc(IND), INVERT_ON, BOLD_ON, enc(` ${l} `), BOLD_OFF, INVERT_OFF, LF);
+    }
   }
 
+  out.push(LF);
   return out;
 }
 
 // ── Renderiza combo ────────────────────────────────────────────────────────────
 function renderCombo(combo) {
-  const out   = [];
-  const qty   = combo.quantity ?? 1;
-  const name  = combo.combo_name ?? combo.name ?? '';
-  const price = money(combo.subtotal ?? 0);
-  const label = `${qty}x ${name}`;
+  const out    = [];
+  const qty    = combo.quantity ?? 1;
+  const name   = String(combo.combo_name ?? combo.name ?? '').toUpperCase();
+  const qtyTxt = `${qty}x`;
+  const indent = 4 + qtyTxt.length * 2 + 1;
+  const nameLines = wrap(name, W - indent);
 
-  out.push(BOLD_ON, twoCols(label, price), BOLD_OFF);
-  out.push(line('   [COMBO]'));
+  out.push(ALIGN_LEFT, BOLD_ON, enc('[ ] '), DOUBLE_ON, enc(qtyTxt), DOUBLE_OFF);
+  out.push(enc(' ' + (nameLines[0] ?? '')), LF);
+  for (const l of nameLines.slice(1)) out.push(line(' '.repeat(indent) + l));
+  out.push(BOLD_OFF);
+  out.push(line(`${IND}[COMBO]`));
 
   for (const c of (combo.customizations?.ingredients ?? combo.ingredients ?? [])) {
     const role  = c.role ? `${c.role}: ` : '';
     const extra = c.price > 0 ? ` (+${money(c.price)})` : '';
-    out.push(line(`   + ${role}${c.name}${extra}`));
+    for (const l of wrap(`· ${role}${c.name}${extra}`, W - IND.length)) out.push(line(IND + l));
   }
 
   if (combo.notes) {
-    out.push(BOLD_ON);
-    for (const l of wrap(`OBS: ${combo.notes}`, W, 3)) out.push(line(`   ${l}`));
-    out.push(BOLD_OFF);
+    for (const l of wrap(String(combo.notes).toUpperCase(), W - IND.length - 2)) {
+      out.push(enc(IND), INVERT_ON, BOLD_ON, enc(` ${l} `), BOLD_OFF, INVERT_OFF, LF);
+    }
   }
 
+  out.push(LF);
   return out;
 }
 
@@ -174,104 +237,108 @@ export function buildKitchenTicket(payload) {
     cash: 'DINHEIRO', card: 'CARTAO', mercadopago: 'MERCADO PAGO',
   };
   const STATUS_LABELS = {
-    pending: 'AGUARDANDO', paid: 'PAGO', failed: 'FALHOU', refunded: 'REEMBOLSADO',
+    pending: 'AGUARDANDO PAGAMENTO', paid: 'PAGO',
+    failed: 'PAGAMENTO FALHOU', refunded: 'REEMBOLSADO',
+  };
+  const SOURCE_LABELS = {
+    whatsapp: 'WhatsApp', instagram: 'Instagram', pdv: 'PDV', balcao: 'balcao',
+    web: 'site', site: 'site', storefront: 'site', payment_link: 'link de pagamento',
   };
 
   const payMethod = PAYMENT_LABELS[order.payment_method] ?? String(order.payment_method ?? '').toUpperCase();
   const payStatus = STATUS_LABELS[order.payment_status]  ?? String(order.payment_status  ?? '').toUpperCase();
+  const isPaid    = order.payment_status === 'paid';
 
   const out = [];
-
-  // ── Init ──────────────────────────────────────────────────────────────────
   out.push(INIT, CODEPAGE_PC850);
 
-  // ── Cabeçalho: nome da loja ───────────────────────────────────────────────
-  out.push(ALIGN_CENTER);
+  // ── Cabeçalho: selo da loja + nome ────────────────────────────────────────
+  // Com quatro lojas na mesma impressora, é a forma que separa as comandas na
+  // bancada. Sem logo no payload, sobra o nome — a comanda sai igual.
+  const logo = raster(store.logo_escpos);
+  if (logo.length) out.push(...logo, LF);
+  out.push(ALIGN_CENTER, BOLD_ON, enc(String(store.name ?? 'LOJA').toUpperCase()), LF, BOLD_OFF, LF);
+
+  // ── Faixa 1: o modo, que decide o fluxo inteiro ──────────────────────────
+  out.push(...band(isDelivery ? 'ENTREGA' : isPickup ? 'RETIRADA' : 'PAGTO POR LINK', { big: true }));
   out.push(LF);
-  out.push(DOUBLE_ON, BOLD_ON, enc(String(store.name ?? 'LOJA').toUpperCase()), LF, BOLD_OFF, DOUBLE_OFF);
-  if (store.phone)   out.push(enc(store.phone), LF);
-  if (store.address) out.push(enc(store.address), LF);
-  out.push(LF, dashed());
 
-  // ── Numero do pedido (invertido) ─────────────────────────────────────────
-  const orderNum = `  PEDIDO #${order.order_number ?? ''}  `;
-  out.push(ALIGN_CENTER, INVERT_ON, BOLD_ON, DOUBLE_HEIGHT_ON);
-  out.push(enc(orderNum), LF);
-  out.push(DOUBLE_OFF, BOLD_OFF, INVERT_OFF);
+  // ── Número do pedido + contexto ──────────────────────────────────────────
+  out.push(ALIGN_CENTER, DOUBLE_ON, BOLD_ON, enc(`#${order.order_number ?? ''}`), LF, BOLD_OFF, DOUBLE_OFF);
+  const canal = SOURCE_LABELS[order.source] ?? '';
+  const contexto = [
+    order.created_at ? formatDate(order.created_at) : '',
+    canal ? `via ${canal}` : '',
+  ].filter(Boolean).join('  ');
+  if (contexto) out.push(ALIGN_CENTER, enc(contexto), LF);
 
-  // Data/hora + tipo de entrega
-  if (order.created_at) out.push(enc(formatDate(order.created_at)), LF);
-  const deliveryLabel = isDelivery
-    ? '*** ENTREGA ***'
-    : isPickup ? '*** RETIRADA ***' : '*** PAGAMENTO POR LINK ***';
-  out.push(BOLD_ON, enc(deliveryLabel), LF, BOLD_OFF);
-
-  // Agendado
+  // ── Faixa 2: agendamento (só quando existe, e aí manda no papel) ─────────
   const sched = [order.scheduled_date, order.scheduled_time].filter(Boolean).join(' ');
-  if (sched) out.push(BOLD_ON, enc(`AGENDADO: ${sched}`), LF, BOLD_OFF);
+  if (sched) out.push(LF, ...band(`AGENDADO ${sched}`));
+  out.push(LF);
 
-  out.push(LF, ALIGN_LEFT, dashed());
-
-  // ── Cliente ───────────────────────────────────────────────────────────────
-  out.push(BOLD_ON, line('CLIENTE'), BOLD_OFF);
-  out.push(BOLD_ON, line(String(customer.name ?? '')), BOLD_OFF);
-  if (customer.phone) out.push(line(customer.phone));
-
+  // ── Cliente, centralizado ────────────────────────────────────────────────
+  if (customer.name) out.push(ALIGN_CENTER, BOLD_ON, enc(String(customer.name).toUpperCase()), LF, BOLD_OFF);
+  if (customer.phone) out.push(ALIGN_CENTER, enc(String(customer.phone)), LF);
   if (isDelivery && payload.address_lines?.length) {
-    out.push(LF, BOLD_ON, line('ENDERECO DE ENTREGA:'), BOLD_OFF);
-    for (const l of payload.address_lines) out.push(line(String(l)));
-  } else if (isPickup) {
-    out.push(LF, BOLD_ON, line('** RETIRADA NO LOCAL **'), BOLD_OFF);
+    for (const l of payload.address_lines) {
+      for (const w of wrap(String(l))) out.push(ALIGN_CENTER, enc(w), LF);
+    }
   }
-  out.push(dashed());
+  out.push(LF);
 
-  // ── Atenção da loja ───────────────────────────────────────────────────────
+  // ── Faixa 3: atenção da loja ─────────────────────────────────────────────
   const kitchenNotes = [order.internal_notes, order.delivery_instructions].filter(Boolean).join(' | ');
   if (kitchenNotes) {
-    out.push(ALIGN_CENTER, INVERT_ON, BOLD_ON, enc('  !! ATENCAO DA LOJA !!  '), LF, BOLD_OFF, INVERT_OFF);
-    out.push(ALIGN_LEFT);
-    for (const l of wrap(kitchenNotes)) out.push(BOLD_ON, line(l), BOLD_OFF);
-    out.push(dashed());
+    out.push(...band('!! ATENCAO DA LOJA !!'));
+    for (const l of wrap(kitchenNotes)) out.push(ALIGN_CENTER, BOLD_ON, enc(l), LF, BOLD_OFF);
+    out.push(LF);
   }
 
-  // ── Observações do cliente ────────────────────────────────────────────────
+  // ── Faixa 4: observação do cliente (só imprime se existir) ───────────────
   const custNotes = order.customer_notes ?? order.observacoes ?? order.delivery_notes ?? '';
   if (custNotes) {
-    out.push(BOLD_ON, line('OBSERVACOES:'), BOLD_OFF);
-    for (const l of wrap(custNotes)) out.push(line(l));
-    out.push(dashed());
+    out.push(...band('OBSERVACAO DO CLIENTE'));
+    for (const l of wrap(custNotes)) out.push(ALIGN_CENTER, BOLD_ON, enc(l), LF, BOLD_OFF);
+    out.push(LF);
   }
 
-  // ── Itens ─────────────────────────────────────────────────────────────────
-  out.push(BOLD_ON, line('ITENS DO PEDIDO'), BOLD_OFF);
-  out.push(divider());
+  // ── Itens ────────────────────────────────────────────────────────────────
+  // A contagem é a soma das quantidades, não o número de linhas: é o número
+  // que se confere contra a sacola fechada.
+  const unidades =
+    items.reduce((n, i) => n + Number(i.qty ?? i.quantity ?? 1), 0) +
+    combos.reduce((n, c) => n + Number(c.quantity ?? 1), 0);
+  out.push(...band(`${unidades} ${unidades === 1 ? 'ITEM' : 'ITENS'}`));
+  out.push(LF);
 
-  for (const item  of items)  { out.push(...renderItem(item),  divider()); }
-  for (const combo of combos) { out.push(...renderCombo(combo), divider()); }
+  for (const item  of items)  out.push(...renderItem(item));
+  for (const combo of combos) out.push(...renderCombo(combo));
 
-  // ── Totais ────────────────────────────────────────────────────────────────
-  const subtotal    = parseFloat(totals.subtotal    ?? order.subtotal    ?? 0);
+  // ── Totais ───────────────────────────────────────────────────────────────
+  const subtotal    = parseFloat(totals.subtotal     ?? order.subtotal     ?? 0);
   const deliveryFee = parseFloat(totals.delivery_fee ?? order.delivery_fee ?? 0);
-  const discount    = parseFloat(totals.discount    ?? order.discount    ?? 0);
-  const total       = parseFloat(totals.total       ?? order.total       ?? 0);
+  const discount    = parseFloat(totals.discount     ?? order.discount     ?? 0);
+  const total       = parseFloat(totals.total        ?? order.total        ?? 0);
 
-  out.push(twoCols('Subtotal:', money(subtotal)));
-  if (deliveryFee > 0) out.push(twoCols('Taxa de Entrega:', money(deliveryFee)));
-  if (discount    > 0) out.push(twoCols('Desconto:', `- ${money(discount)}`));
-  out.push(divider('='));
-  out.push(BOLD_ON, twoCols('TOTAL:', money(total)), BOLD_OFF);
-  out.push(divider('='));
+  out.push(ALIGN_LEFT, divider());
+  out.push(twoCols('Subtotal', money(subtotal)));
+  if (deliveryFee > 0) out.push(twoCols('Entrega', money(deliveryFee)));
+  if (discount    > 0) out.push(twoCols('Desconto', `- ${money(discount)}`));
+  out.push(LF);
+  out.push(ALIGN_CENTER, DOUBLE_HEIGHT_ON, BOLD_ON, enc(`TOTAL  ${money(total)}`), LF, BOLD_OFF, DOUBLE_OFF);
+  out.push(LF);
 
-  // ── Pagamento ─────────────────────────────────────────────────────────────
-  out.push(twoCols('Pagamento:', payMethod));
-  out.push(twoCols('Status pgto:', payStatus));
-  out.push(dashed());
+  // ── Faixa 5: pagamento — calma quando pago, grito quando não ─────────────
+  out.push(...band(isPaid ? `${payMethod} - PAGO` : `!! ${payStatus} !!`));
 
-  // ── Rodapé ────────────────────────────────────────────────────────────────
-  out.push(ALIGN_CENTER);
-  out.push(BOLD_ON, enc('Obrigado pela preferencia!'), LF, BOLD_OFF);
-  out.push(enc(`Impresso em ${formatDate(new Date().toISOString())}`), LF);
-  out.push(LF, LF, LF, LF);
+  // ── Código de barras do pedido (bipável na expedição) ───────────────────
+  out.push(LF, ...barcode(order.order_number));
+  if (order.order_number) out.push(ALIGN_CENTER, enc(String(order.order_number)), LF);
+
+  // ── Rodapé: a loja sai daqui, não do topo ───────────────────────────────
+  out.push(LF, ALIGN_CENTER, enc([store.name, store.phone].filter(Boolean).join(' · ')), LF);
+  out.push(LF, LF, LF);
   out.push(CUT);
 
   return Buffer.concat(out.flat().map((b) => Buffer.isBuffer(b) ? b : enc(b)));
@@ -279,24 +346,40 @@ export function buildKitchenTicket(payload) {
 
 export function buildTestTicket() {
   return buildKitchenTicket({
-    store: { name: 'Pastita', phone: '(11) 99999-9999' },
+    store: {
+      name: 'Cê Saladas',
+      phone: '(63) 3025-0000',
+      logo_escpos: TEST_LOGO,
+    },
     order: {
       order_number: 'TESTE-001',
       created_at: new Date().toISOString(),
-      delivery_method: 'pickup',
+      source: 'whatsapp',
+      delivery_method: 'delivery',
       payment_method: 'pix',
       payment_status: 'paid',
-      customer_notes: 'Sem cebola e sem tomate, obrigado!',
-      internal_notes: 'Cliente VIP — atenção especial',
+      customer_notes: 'Sem cebola na salada, por favor.',
     },
-    customer: { name: 'Joao da Silva', phone: '(11) 91234-5678' },
-    address_lines: [],
+    customer: { name: 'Ana Paula Souza', phone: '(63) 98888-1234' },
+    address_lines: [
+      'Rua das Palmeiras, 145 - Apto 302',
+      'Plano Diretor Sul - Palmas/TO',
+    ],
     items: [
-      { qty: 2, name: 'Pastita Tradicional', subtotal: '50.00', notes: 'Sem molho' },
-      { qty: 1, name: 'Suco de Laranja Natural', subtotal: '10.00' },
+      {
+        qty: 2,
+        name: 'Salada Caesar Grande',
+        subtotal: '59.80',
+        notes: 'Sem cebola',
+        ingredients: [
+          { role: 'Proteina', name: 'Frango grelhado', price: 0 },
+          { role: 'Molho', name: 'Caesar', price: 0 },
+        ],
+      },
+      { qty: 1, name: 'Suco de Laranja Natural 500ml', subtotal: '12.00' },
     ],
     combo_items: [],
-    totals: { subtotal: '60.00', delivery_fee: '0.00', discount: '5.00', total: '55.00' },
+    totals: { subtotal: '71.80', delivery_fee: '8.00', discount: '7.18', total: '72.62' },
   });
 }
 
