@@ -287,6 +287,16 @@ export function buildKitchenTicket(payload) {
   }
   out.push(LF);
 
+  // ── Aviso de endereço divergente: o entregador precisa ver antes de sair ─
+  const addressWarning = payload.address_warning ?? [];
+  if (addressWarning.length) {
+    out.push(...band('!! CONFERIR ENDERECO !!'));
+    for (const l of addressWarning.slice(1)) {
+      for (const w of wrap(String(l))) out.push(ALIGN_CENTER, BOLD_ON, enc(w), LF, BOLD_OFF);
+    }
+    out.push(LF);
+  }
+
   // ── Faixa 3: atenção da loja ─────────────────────────────────────────────
   const kitchenNotes = [order.internal_notes, order.delivery_instructions].filter(Boolean).join(' | ');
   if (kitchenNotes) {
