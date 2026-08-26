@@ -160,6 +160,23 @@ function renderItem(item) {
   const variant = item.variant_name ?? item.variant ?? '';
   if (variant) out.push(line(`${IND}· ${variant}`));
 
+  // ── Preparo ────────────────────────────────────────────────────────────────
+  // O que a cozinha MONTA, não o que o cliente recebe. Vem do backend em
+  // `prep` (ver `linhas_de_preparo` em print_service.py): o rendimento já
+  // multiplicado e a composição do item.
+  //
+  // Para a Ivoneth Banqueteria isso é o pedido inteiro: "2x MINI HAMBURGUER"
+  // não diz se são 2 unidades ou 2 embalagens de 50. A linha `>>` responde, e
+  // por isso é a única do bloco em negrito — é o número que a cozinha usa.
+  for (const p of (item.prep ?? [])) {
+    const txt = String(p);
+    const destaque = txt.startsWith('>>');
+    for (const l of wrap(txt, W - IND.length)) {
+      if (destaque) out.push(enc(IND), BOLD_ON, enc(l), BOLD_OFF, LF);
+      else out.push(line(IND + l));
+    }
+  }
+
   // Escolhas de combo / detalhes vindos do backend (payload 'details').
   // Quando o backend também manda as escolhas espelhadas em 'ingredients'
   // (compat com agents antigos), pula details p/ não imprimir 2x.
