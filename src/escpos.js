@@ -141,7 +141,7 @@ const IND = ' '.repeat(8);
 // ── Renderiza item ─────────────────────────────────────────────────────────────
 // Layout: '[ ] ' + quantidade em corpo duplo + nome. A quantidade é o dado que
 // mais gera erro na cozinha, então é a única coisa da linha que cresce.
-function renderItem(item) {
+function renderItem(item, preparo = false) {
   const out    = [];
   const qty    = item.qty ?? item.quantity ?? 1;
   const name   = String(item.name ?? item.product_name ?? '').toUpperCase();
@@ -168,7 +168,12 @@ function renderItem(item) {
   // Para a Ivoneth Banqueteria isso é o pedido inteiro: "2x MINI HAMBURGUER"
   // não diz se são 2 unidades ou 2 embalagens de 50. A linha `>>` responde, e
   // por isso é a única do bloco em negrito — é o número que a cozinha usa.
-  for (const p of (item.prep ?? [])) {
+  //
+  // Só sai na comanda de PREPARO. A composição de uma Tábua de Frios são dez
+  // linhas: somada à comanda de entrega, ela empurra o papel para fora da
+  // bobina e afoga o endereço, que é o que o entregador precisa ler. Quem
+  // monta e quem entrega leem papéis diferentes.
+  for (const p of (preparo ? (item.prep ?? []) : [])) {
     const txt = String(p);
     const destaque = txt.startsWith('>>');
     for (const l of wrap(txt, W - IND.length)) {
@@ -341,7 +346,10 @@ export function buildKitchenTicket(payload) {
   out.push(...band(`${unidades} ${unidades === 1 ? 'ITEM' : 'ITENS'}`));
   out.push(LF);
 
-  for (const item  of items)  out.push(...renderItem(item));
+  // `prep_ticket` é a via de MONTAGEM, pedida à parte no painel. Qualquer
+  // outro template é comanda de entrega e não carrega composição.
+  const preparo = payload.template === 'prep_ticket';
+  for (const item  of items)  out.push(...renderItem(item, preparo));
   for (const combo of combos) out.push(...renderCombo(combo));
 
   // ── Totais ───────────────────────────────────────────────────────────────
