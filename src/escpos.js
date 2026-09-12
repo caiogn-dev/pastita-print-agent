@@ -356,11 +356,15 @@ export function buildKitchenTicket(payload) {
   const subtotal    = parseFloat(totals.subtotal     ?? order.subtotal     ?? 0);
   const deliveryFee = parseFloat(totals.delivery_fee ?? order.delivery_fee ?? 0);
   const discount    = parseFloat(totals.discount     ?? order.discount     ?? 0);
+  // Acréscimo pago pelo cliente por usar vale. Sem a linha, itens + entrega
+  // não batem com o TOTAL impresso embaixo e o caixa acha que errou a conta.
+  const voucherFee  = parseFloat(totals.voucher_fee  ?? order.voucher_fee  ?? 0);
   const total       = parseFloat(totals.total        ?? order.total        ?? 0);
 
   out.push(ALIGN_LEFT, divider());
   out.push(twoCols('Subtotal', money(subtotal)));
   if (deliveryFee > 0) out.push(twoCols('Entrega', money(deliveryFee)));
+  if (voucherFee  > 0) out.push(twoCols('Acrescimo vale', money(voucherFee)));
   if (discount    > 0) out.push(twoCols('Desconto', `- ${money(discount)}`));
   out.push(LF);
   out.push(ALIGN_CENTER, DOUBLE_HEIGHT_ON, BOLD_ON, enc(`TOTAL  ${money(total)}`), LF, BOLD_OFF, DOUBLE_OFF);
