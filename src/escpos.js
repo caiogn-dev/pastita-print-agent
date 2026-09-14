@@ -242,6 +242,21 @@ function renderCombo(combo) {
 }
 
 // ── Builder principal ──────────────────────────────────────────────────────────
+/** Linhas do troco. Exportada para o preview e para teste. */
+export function trocoLines(order, total) {
+  if (order?.change_for === null || order?.change_for === undefined || order?.change_for === '') return [];
+  const para = parseFloat(order.change_for);
+  if (Number.isNaN(para)) return [];
+  if (para === 0) return [LF, ...band('SEM TROCO')];
+  const levar = order.change_due !== null && order.change_due !== undefined
+    ? parseFloat(order.change_due)
+    : Math.max(0, para - (parseFloat(total) || 0));
+  return [
+    LF, ...band(`TROCO PARA ${money(para)}`),
+    ALIGN_CENTER, DOUBLE_HEIGHT_ON, BOLD_ON, enc(`LEVAR  ${money(levar)}`), LF, BOLD_OFF, DOUBLE_OFF,
+  ];
+}
+
 export function buildKitchenTicket(payload) {
   const store    = payload.store    ?? {};
   const order    = payload.order    ?? {};
@@ -372,6 +387,11 @@ export function buildKitchenTicket(payload) {
 
   // ── Faixa 5: pagamento — calma quando pago, grito quando não ─────────────
   out.push(...band(isPaid ? `${payMethod} - PAGO` : `!! ${payStatus} !!`));
+
+  // ── Troco do dinheiro: o entregador sai sabendo quanto levar ────────────
+  // null = ninguém perguntou (nada sai); 0 = cliente disse que não precisa.
+  // Mesmo texto da comanda do painel (OrderPrint.tsx).
+  out.push(...trocoLines(order, total));
 
   // ── Código de barras do pedido (bipável na expedição) ───────────────────
   out.push(LF, ...barcode(order.order_number));
