@@ -1,6 +1,6 @@
 {
   "name": "pastita-print-agent",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Local print agent for automatic Epson TM-T20 order printing",

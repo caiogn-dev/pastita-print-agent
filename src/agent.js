@@ -1,4 +1,9 @@
 import os from 'node:os';
+import { createRequire } from 'node:module';
+
+// A versão que o painel compara com a atual (server2: VERSAO_ATUAL_DO_AGENT).
+// Vem do package.json: era cravada em dois lugares e dizia 0.1.0 e 0.2.0 ao mesmo tempo.
+const APP_VERSION = createRequire(import.meta.url)('../package.json').version;
 
 import { PrintApiClient } from './api-client.js';
 import { buildKitchenTicket, buildCustomerReceipt } from './escpos.js';
@@ -105,7 +110,7 @@ export class PastitaPrintAgent {
           // loop e as chaves seguintes nunca rodavam.
           try {
             const response = await api.claimNext({
-              app_version: '0.1.0',
+              app_version: APP_VERSION,
               host_name: os.hostname(),
             });
             const job = response.job;
@@ -164,7 +169,7 @@ export class PastitaPrintAgent {
     const results = await Promise.allSettled(
       this.clients.map((api) =>
         api.heartbeat({
-          app_version: '0.2.0',
+          app_version: APP_VERSION,
           host_name: os.hostname(),
           printer_name: this.#effectivePrinter(api),
           available_printers: availablePrinters,
@@ -177,6 +182,13 @@ export class PastitaPrintAgent {
     results.forEach((res, idx) => {
       const name = res.status === 'fulfilled' ? res.value?.printer_name : null;
       if (name) this.clients[idx].panelPrinterName = name;
+      // O servidor diz qual é a versão atual; aqui só avisa no log (o painel
+      // mostra o selo). Uma vez por execução, não a cada 30 s.
+      const atual = res.status === 'fulfilled' ? res.value?.versao_atual : null;
+      if (atual && res.value?.versao_desatualizada && !this.avisouVersao) {
+        this.avisouVersao = true;
+        console.warn(`[print-agent] versão ${APP_VERSION} desatualizada — atualize para ${atual} (git pull && npm install && reinicie o serviço)`);
+      }
     });
 
     this.lastHeartbeatAt = now;
