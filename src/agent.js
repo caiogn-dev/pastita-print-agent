@@ -7,6 +7,7 @@ const APP_VERSION = createRequire(import.meta.url)('../package.json').version;
 
 import { PrintApiClient } from './api-client.js';
 import { buildKitchenTicket, buildCustomerReceipt } from './escpos.js';
+import { buildZplLabel } from './zpl.js';
 import { StateStore } from './state-store.js';
 import { printRawWindows, listWindowsPrinters } from './printers/windows-raw.js';
 
@@ -135,7 +136,9 @@ export class PastitaPrintAgent {
               },
             });
           } catch (error) {
-            console.error('[print-agent] client error (chave ignorada neste ciclo):', error.message);
+            // Qual chave? Sem o prefixo, "HTTP 401" em config com 4 chaves não diz
+            // qual PC/loja está com a chave velha (25/set: notebook 10 min mudo).
+            console.error(`[print-agent] client error (chave ${api.keyPrefix} ignorada neste ciclo):`, error.message);
           }
         }
         if (!gotJob) {
@@ -180,6 +183,9 @@ export class PastitaPrintAgent {
     // O painel é a fonte de verdade: se o backend devolver printer_name,
     // o agent passa a usar essa impressora (por loja) sem editar o config
     results.forEach((res, idx) => {
+      if (res.status === 'rejected') {
+        console.error(`[print-agent] heartbeat recusado (chave ${this.clients[idx].keyPrefix}):`, res.reason?.message);
+      }
       const name = res.status === 'fulfilled' ? res.value?.printer_name : null;
       if (name) this.clients[idx].panelPrinterName = name;
       // O servidor diz qual é a versão atual; aqui só avisa no log (o painel
@@ -202,6 +208,7 @@ export class PastitaPrintAgent {
     const builders = {
       kitchen_ticket: buildKitchenTicket,
       customer_receipt: buildCustomerReceipt,
+      etiqueta_zpl: buildZplLabel,
     };
     const builder = builders[job.template];
     if (!builder) {

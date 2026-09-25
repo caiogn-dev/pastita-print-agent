@@ -1,16 +1,17 @@
 {
   "name": "pastita-print-agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Local print agent for automatic Epson TM-T20 order printing",
+  "description": "Local print agent: comandas ESC/POS (Epson) e etiquetas ZPL (Zebra)",
   "scripts": {
     "start": "node src/cli.js start",
     "list-printers": "node src/cli.js list-printers",
     "test-print": "node src/cli.js test-print",
     "install-service": "node scripts/service.cjs install",
     "uninstall-service": "node scripts/service.cjs uninstall",
-    "preview": "node scripts/preview.mjs"
+    "preview": "node scripts/preview.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"

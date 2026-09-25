@@ -2,6 +2,8 @@ export class PrintApiClient {
   constructor({ backendUrl, agentKey }) {
     this.backendUrl = backendUrl;
     this.agentKey = agentKey;
+    // Só o prefixo aparece em log — é o que o painel mostra; o segredo nunca.
+    this.keyPrefix = String(agentKey || '').split('.')[0] || '(vazia)';
   }
 
   async heartbeat(payload = {}) {
