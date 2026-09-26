@@ -7,10 +7,13 @@ export function loadConfig() {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const parsed = JSON.parse(raw);
 
-  // suporta agentKey (string) ou agentKeys (array)
-  const agentKeys = Array.isArray(parsed.agentKeys)
-    ? parsed.agentKeys
-    : [String(parsed.agentKey || '')];
+  // Aceita `agentKeys` (lista) ou `agentKey` (texto OU lista). Em 25/09 o
+  // notebook da loja ficou 20 h mudo porque o config tinha `agentKey: [a, b]`:
+  // String([a, b]) vira "a,b" — uma chave só, com o segredo errado.
+  const bruto = parsed.agentKeys ?? parsed.agentKey ?? [];
+  const agentKeys = (Array.isArray(bruto) ? bruto : [bruto])
+    .map((k) => String(k || '').trim())
+    .filter(Boolean);
 
   return {
     backendUrl: String(parsed.backendUrl || '').replace(/\/+$/, ''),
